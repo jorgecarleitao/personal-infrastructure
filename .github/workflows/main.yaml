@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -16,11 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download state from secret and decode (before init)
-      - name: Download Terraform state from secret
+      - name: Pull tf state
         run: |
-          if [ -n "${{ secrets.TF_STATE }}" ]; then
-            echo "${{ secrets.TF_STATE }}" | base64 --decode > terraform.tfstate
+          git fetch origin tfstate || echo "tfstate branch does not exist"
+          if git show-ref --verify --quiet refs/remotes/origin/tfstate; then
+            if git ls-tree --name-only origin/tfstate | grep -q '^terraform.tfstate.enc$'; then
+              git checkout origin/tfstate -- terraform.tfstate.enc
+              openssl aes-256-cbc -pbkdf2 -d -in terraform.tfstate.enc -out terraform.tfstate -pass pass:${{ secrets.TF_STATE_PASSWORD }}
+            else
+              echo "Encrypted terraform.tfstate.enc file not found in tfstate branch"
+            fi
+          else
+            echo "tfstate branch not found, skipping state download"
           fi
 
       - uses: hashicorp/setup-terraform@v3
@@ -32,11 +42,14 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
 
-      - name: Upload Terraform state to secret
+      - name: Push tf state
         if: always()
         run: |
-          STATE_B64=$(base64 < terraform.tfstate | tr -d '\n')
-          echo "::add-mask::$STATE_B64"
-          gh secret set TF_STATE -b"$STATE_B64"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          openssl aes-256-cbc -pbkdf2 -salt -in terraform.tfstate -out terraform.tfstate.enc -pass pass:${{ secrets.TF_STATE_PASSWORD }}
+          git pull origin tfstate || true
+          git checkout tfstate || git checkout -b tfstate
+          git add terraform.tfstate.enc
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git commit -m "Update tfstate" || echo "No changes"
+          git push origin tfstate
