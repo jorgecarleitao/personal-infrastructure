@@ -25,13 +25,15 @@ jobs:
           if git show-ref --verify --quiet refs/remotes/origin/tfstate; then
             if git ls-tree --name-only origin/tfstate | grep -q '^terraform.tfstate.enc$'; then
               git checkout origin/tfstate -- terraform.tfstate.enc
-              openssl aes-256-cbc -pbkdf2 -d -in terraform.tfstate.enc -out terraform.tfstate -pass pass:${{ secrets.TF_STATE_PASSWORD }}
+              openssl aes-256-cbc -pbkdf2 -d -in terraform.tfstate.enc -out terraform.tfstate -pass pass:${TF_STATE_PASSWORD}
             else
               echo "Encrypted terraform.tfstate.enc file not found in tfstate branch"
             fi
           else
             echo "tfstate branch not found, skipping state download"
           fi
+        env:
+          TF_STATE_PASSWORD: ${{ secrets.TF_STATE_PASSWORD }}
 
       - uses: hashicorp/setup-terraform@v3
 
@@ -45,7 +47,7 @@ jobs:
       - name: Push tf state
         if: always()
         run: |
-          openssl aes-256-cbc -pbkdf2 -salt -in terraform.tfstate -out terraform.tfstate.enc -pass pass:${{ secrets.TF_STATE_PASSWORD }}
+          openssl aes-256-cbc -pbkdf2 -salt -in terraform.tfstate -out terraform.tfstate.enc -pass pass:${TF_STATE_PASSWORD}
           git pull origin tfstate || true
           git checkout tfstate || git checkout -b tfstate
           git add terraform.tfstate.enc
@@ -53,3 +55,5 @@ jobs:
           git config user.email "github-actions@users.noreply.github.com"
           git commit -m "Update tfstate" || echo "No changes"
           git push origin tfstate
+        env:
+          TF_STATE_PASSWORD: ${{ secrets.TF_STATE_PASSWORD }}
