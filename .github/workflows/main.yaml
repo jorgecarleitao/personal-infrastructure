@@ -16,6 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Download state from secret and decode (before init)
+      - name: Download Terraform state from secret
+        run: |
+          if [ -n "${{ secrets.TF_STATE }}" ]; then
+            echo "${{ secrets.TF_STATE }}" | base64 --decode > terraform.tfstate
+          fi
+
       - uses: hashicorp/setup-terraform@v3
 
       - run: |
@@ -24,3 +31,12 @@ jobs:
         name: Terraform apply
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+
+      - name: Upload Terraform state to secret
+        if: always()
+        run: |
+          STATE_B64=$(base64 < terraform.tfstate | tr -d '\n')
+          echo "::add-mask::$STATE_B64"
+          gh secret set TF_STATE -b"$STATE_B64"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
